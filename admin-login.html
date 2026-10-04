@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>DRIVEKIT — службовий вхід</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body class="admin-body admin-login-body">
+  <main class="login-shell">
+    <a class="brand" href="./index.html"><span class="brand-mark">D</span><span>DRIVEKIT</span></a>
+    <form class="login-card" id="loginForm">
+      <div class="eyebrow">Службова зона</div>
+      <h1>Вхід в адмінку</h1>
+      <p>Використайте логін і пароль, налаштовані у Vercel.</p>
+      <label><span>Логін</span><input name="username" autocomplete="username" required autofocus></label>
+      <label><span>Пароль</span><input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="btn btn-wide" type="submit">Увійти</button>
+      <div class="form-status" id="loginStatus" role="status"></div>
+    </form>
+  </main>
+  <script src="./admin-login.js"></script>
+</body>
+</html>

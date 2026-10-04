@@ -5,7 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#07090d" />
   <meta name="description" content="DRIVEKIT 4-в-1: пускозарядний пристрій, компресор 150 PSI, USB Power Bank та LED-ліхтар." />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="DRIVEKIT — товари для автомобіля" />
+  <meta property="og:description" content="Автомобільні рішення без зайвої складності. Каталог, кошик і доставка по Україні." />
+  <meta property="og:image" content="https://drops.in.ua/img/p/132259953/0.webp" />
   <title>DRIVEKIT 4-в-1 — готовий до дороги</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://drops.in.ua" crossorigin />
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -19,13 +24,16 @@
     </a>
 
     <nav class="desktop-nav" aria-label="Головна навігація">
+      <a href="#catalog">Каталог</a>
       <a href="#features">4-в-1</a>
       <a href="#how">Як працює</a>
       <a href="#kit">Комплектація</a>
       <a href="#faq">FAQ</a>
     </nav>
 
-    <button class="btn btn-small js-order">Замовити</button>
+    <button class="cart-trigger" id="openCart" type="button" aria-label="Відкрити кошик">
+      Кошик <span id="cartCount">0</span>
+    </button>
   </header>
 
   <main>
@@ -46,6 +54,7 @@
         <div class="trust-inline">
           <span>Оплата при отриманні</span>
           <span>Нова Пошта</span>
+          <span>Укрпошта</span>
           <span>Перевірка у відділенні</span>
         </div>
       </div>
@@ -112,6 +121,17 @@
           <h3>Потрібне світло</h3>
           <p>LED-ліхтар допомагає під капотом, біля колеса або під час зупинки в темний час доби.</p>
         </article>
+      </div>
+    </section>
+
+    <section class="catalog section" id="catalog">
+      <div class="section-head reveal">
+        <div class="eyebrow">Каталог DRIVEKIT</div>
+        <h2>Все потрібне для авто — <span>в одному місці.</span></h2>
+      </div>
+      <div class="category-tabs" id="categoryTabs" aria-label="Категорії товарів"></div>
+      <div class="product-grid" id="productGrid" aria-live="polite">
+        <div class="catalog-loading">Завантажуємо товари…</div>
       </div>
     </section>
 
@@ -241,8 +261,9 @@
     <section class="delivery section">
       <div class="delivery-grid reveal">
         <div><span>01</span><strong>Нова Пошта</strong><p>Доставка по Україні.</p></div>
-        <div><span>02</span><strong>Оплата при отриманні</strong><p>Можна перевірити товар у відділенні.</p></div>
-        <div><span>03</span><strong>Підтвердження телефоном</strong><p>Без реєстрацій та складного checkout.</p></div>
+        <div><span>02</span><strong>Укрпошта</strong><p>Доставка на вказану поштову адресу.</p></div>
+        <div><span>03</span><strong>Оплата при отриманні</strong><p>Умови оплати менеджер підтвердить телефоном.</p></div>
+        <div><span>04</span><strong>Без реєстрації</strong><p>Кошик і швидке оформлення без особистого кабінету.</p></div>
       </div>
     </section>
 
@@ -271,7 +292,7 @@
         </details>
         <details>
           <summary>Як оформити замовлення?</summary>
-          <p>Натисніть «Замовити», залиште ім’я та номер телефону. Менеджер зв’яжеться для підтвердження й уточнення доставки.</p>
+          <p>Додайте товар у кошик, вкажіть ПІБ і телефон, а потім оберіть Нову пошту з потрібним відділенням або введіть адресу доставки Укрпоштою.</p>
         </details>
       </div>
     </section>
@@ -287,6 +308,7 @@
     <a class="brand" href="#top"><span class="brand-mark">D</span><span>DRIVEKIT</span></a>
     <p>Автомобільні рішення без зайвої складності.</p>
     <small>© 2026 DRIVEKIT</small>
+    <a class="admin-entry" href="./admin-login.html" aria-label="Службовий вхід"></a>
   </footer>
 
   <div class="mobile-buy">
@@ -294,16 +316,30 @@
     <button class="btn js-order">Замовити</button>
   </div>
 
-  <dialog class="order-modal" id="orderModal">
-    <form class="order-card" id="orderForm">
-      <button type="button" class="close-modal" id="closeModal" aria-label="Закрити">×</button>
-      <div class="eyebrow">Швидке замовлення</div>
-      <h3>DRIVEKIT 4-в-1</h3>
-      <p>Залиште контакти — менеджер зателефонує для підтвердження.</p>
+  <dialog class="cart-modal" id="cartModal">
+    <div class="cart-card">
+      <div class="modal-head">
+        <div><div class="eyebrow">Ваше замовлення</div><h3>Кошик</h3></div>
+        <button type="button" class="close-modal" data-close="cartModal" aria-label="Закрити">×</button>
+      </div>
+      <div class="cart-items" id="cartItems"></div>
+      <div class="cart-empty" id="cartEmpty">Кошик поки порожній.</div>
+      <div class="cart-footer" id="cartFooter">
+        <div class="cart-total"><span>Разом</span><strong id="cartTotal">0 ₴</strong></div>
+        <button class="btn btn-wide" type="button" id="startCheckout">Оформити замовлення</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="order-modal" id="checkoutModal">
+    <form class="order-card checkout-card" id="orderForm">
+      <button type="button" class="close-modal" data-close="checkoutModal" aria-label="Закрити">×</button>
+      <div class="eyebrow">Оформлення замовлення</div>
+      <h3>Контакти й доставка</h3>
 
       <label>
         <span>ПІБ</span>
-        <input type="text" name="name" required autocomplete="name" placeholder="Ваше ім’я">
+        <input type="text" name="customerName" required autocomplete="name" minlength="5" maxlength="120" placeholder="Прізвище Ім’я По батькові">
       </label>
 
       <label>
@@ -311,20 +347,42 @@
         <input type="tel" name="phone" required autocomplete="tel" inputmode="tel" minlength="10" maxlength="16" placeholder="+380 __ ___ __ __">
       </label>
 
-      <label>
-        <span>Місто <em>необов’язково</em></span>
-        <input type="text" name="city" autocomplete="address-level2" placeholder="Наприклад, Київ">
-      </label>
+      <fieldset class="delivery-choice">
+        <legend>Спосіб доставки</legend>
+        <label><input type="radio" name="carrier" value="nova" checked> <span>Нова пошта</span></label>
+        <label><input type="radio" name="carrier" value="ukr"> <span>Укрпошта</span></label>
+      </fieldset>
 
-      <input type="hidden" name="product" value="DRIVEKIT GL-965A 4-в-1">
-      <input type="hidden" name="price" value="2190 UAH">
+      <div id="novaFields">
+        <label class="city-search-wrap">
+          <span>Місто</span>
+          <input type="text" id="novaCity" autocomplete="off" placeholder="Почніть вводити назву міста">
+          <input type="hidden" id="novaCityRef">
+          <div class="city-suggestions" id="citySuggestions"></div>
+        </label>
+        <label>
+          <span>Відділення / поштомат</span>
+          <select id="novaWarehouse" disabled>
+            <option value="">Спочатку оберіть місто</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="ukrFields" hidden>
+        <label>
+          <span>Повна адреса</span>
+          <textarea id="ukrAddress" rows="3" autocomplete="street-address" placeholder="Індекс, область, місто/село, вулиця, будинок, квартира"></textarea>
+        </label>
+      </div>
+
       <label class="hp-field" aria-hidden="true">
         <span>Компанія</span>
         <input type="text" name="company" tabindex="-1" autocomplete="off">
       </label>
 
+      <div class="checkout-summary"><span>До сплати</span><strong id="checkoutTotal">0 ₴</strong></div>
       <button class="btn btn-wide" type="submit" id="submitOrder">Підтвердити замовлення</button>
-      <div class="form-note">Натискаючи кнопку, ви погоджуєтесь на обробку контактних даних лише для підтвердження замовлення.</div>
+      <div class="form-note">Натискаючи кнопку, ви погоджуєтесь на обробку контактних даних для оформлення замовлення.</div>
       <div class="form-status" id="formStatus" role="status"></div>
     </form>
   </dialog>

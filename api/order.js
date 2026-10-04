@@ -1,126 +1,153 @@
-const WINDOW_MS = 60_000;
-const MAX_REQUESTS_PER_WINDOW = 5;
-const requestBuckets = new Map();
+const { fallbackProducts } = require('./_lib/catalog');
+const { clean, clientIp, json, requireJson } = require('./_lib/http');
+const { isConfigured, supabase } = require('./_lib/supabase');
 
-function clean(value, maxLength) {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001F\u007F]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
-}
+const buckets = new Map();
 
-function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  return clean(Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(',')[0], 64) || 'unknown';
-}
-
-function isRateLimited(key) {
+function rateLimited(ip) {
   const now = Date.now();
-  const bucket = requestBuckets.get(key);
-
-  if (!bucket || now - bucket.startedAt >= WINDOW_MS) {
-    requestBuckets.set(key, { startedAt: now, count: 1 });
+  const item = buckets.get(ip);
+  if (!item || now - item.startedAt > 60_000) {
+    buckets.set(ip, { startedAt: now, count: 1 });
     return false;
   }
-
-  bucket.count += 1;
-  return bucket.count > MAX_REQUESTS_PER_WINDOW;
+  item.count += 1;
+  return item.count > 5;
 }
 
-module.exports = async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
+async function loadProducts(ids) {
+  if (!isConfigured()) return fallbackProducts.filter(product => ids.includes(product.id));
+  const encodedIds = ids.map(id => `"${String(id).replace(/["\\]/g, '')}"`).join(',');
+  return supabase(`products?id=in.(${encodeURIComponent(encodedIds)})&active=eq.true&select=id,name,price,stock`);
+}
 
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  }
-
-  const contentType = String(req.headers['content-type'] || '');
-  if (!contentType.includes('application/json')) {
-    return res.status(415).json({ ok: false, error: 'Content-Type must be application/json' });
-  }
-
-  const body = req.body || {};
-
-  // Honeypot: bots commonly fill every field. Return success without sending spam.
-  if (clean(body.company, 100)) {
-    return res.status(200).json({ ok: true });
-  }
-
-  const clientIp = getClientIp(req);
-  if (isRateLimited(clientIp)) {
-    return res.status(429).json({ ok: false, error: 'Too many requests' });
-  }
-
-  const name = clean(body.name, 80);
-  const phone = clean(body.phone, 24);
-  const phoneDigits = phone.replace(/\D/g, '');
-  const city = clean(body.city, 80);
-  const product = clean(body.product, 100) || 'DRIVEKIT GL-965A 4-в-1';
-  const price = clean(body.price, 40) || '2 190 ₴';
-
-  if (name.length < 2 || phoneDigits.length < 10 || phoneDigits.length > 15) {
-    return res.status(400).json({ ok: false, error: 'Invalid order data' });
-  }
-
+async function sendTelegram(order) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) throw new Error('Telegram is not configured');
 
-  if (!token || !chatId) {
-    console.error('Telegram environment variables are not configured');
-    return res.status(503).json({ ok: false, error: 'Order service is not configured' });
-  }
-
-  const source = clean(body.source, 120);
-  const campaign = clean(body.campaign, 120);
-  const pageUrl = clean(body.pageUrl, 300);
-  const referrer = clean(body.referrer, 300);
-  const localTime = new Intl.DateTimeFormat('uk-UA', {
-    timeZone: 'Europe/Kyiv',
-    dateStyle: 'medium',
-    timeStyle: 'medium'
+  const items = order.items.map(item => `• ${item.name} × ${item.quantity} — ${item.lineTotal.toLocaleString('uk-UA')} ₴`);
+  const delivery = order.delivery.carrier === 'nova'
+    ? `Нова пошта\nМісто: ${order.delivery.city}\nВідділення: ${order.delivery.warehouse}`
+    : `Укрпошта\nАдреса: ${order.delivery.address}`;
+  const time = new Intl.DateTimeFormat('uk-UA', {
+    timeZone: 'Europe/Kyiv', dateStyle: 'medium', timeStyle: 'medium'
   }).format(new Date());
 
   const text = [
-    '🚗 НОВЕ ЗАМОВЛЕННЯ DRIVEKIT',
-    '',
-    `Товар: ${product}`,
-    `Ціна: ${price}`,
-    '',
-    `Ім’я: ${name}`,
-    `Телефон: ${phone}`,
-    `Місто: ${city || 'не вказано'}`,
-    '',
-    `Джерело: ${source || 'прямий перехід'}`,
-    campaign ? `Кампанія: ${campaign}` : '',
-    referrer ? `Referrer: ${referrer}` : '',
-    pageUrl ? `Сторінка: ${pageUrl}` : '',
-    `Час: ${localTime}`
+    '🛒 НОВЕ ЗАМОВЛЕННЯ DRIVEKIT', '',
+    ...items, '',
+    `Разом: ${order.total.toLocaleString('uk-UA')} ₴`, '',
+    `ПІБ: ${order.customerName}`,
+    `Телефон: ${order.phone}`, delivery, '',
+    `Джерело: ${order.source || 'прямий перехід'}`,
+    order.campaign ? `Кампанія: ${order.campaign}` : '',
+    `Час: ${time}`
   ].filter(Boolean).join('\n');
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
-
   try {
-    const telegramResponse = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
       signal: controller.signal
     });
-
-    if (!telegramResponse.ok) {
-      const details = await telegramResponse.text();
-      console.error(`Telegram API returned ${telegramResponse.status}: ${details.slice(0, 500)}`);
-      return res.status(502).json({ ok: false, error: 'Telegram delivery failed' });
-    }
-
-    return res.status(200).json({ ok: true });
-  } catch (error) {
-    console.error('Telegram request failed', error);
-    return res.status(502).json({ ok: false, error: 'Telegram delivery failed' });
+    if (!response.ok) throw new Error(`Telegram returned ${response.status}`);
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+module.exports = async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return json(res, 405, { ok: false, error: 'Method not allowed' });
+  }
+  if (!requireJson(req, res)) return;
+  if (clean(req.body?.company, 100)) return json(res, 200, { ok: true });
+  if (rateLimited(clientIp(req))) return json(res, 429, { ok: false, error: 'Too many requests' });
+
+  const customerName = clean(req.body?.customerName, 120);
+  const phone = clean(req.body?.phone, 24);
+  const phoneDigits = phone.replace(/\D/g, '');
+  const carrier = clean(req.body?.delivery?.carrier, 20);
+  const city = clean(req.body?.delivery?.city, 120);
+  const warehouse = clean(req.body?.delivery?.warehouse, 220);
+  const address = clean(req.body?.delivery?.address, 300);
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items.slice(0, 50) : [];
+
+  if (customerName.length < 5 || phoneDigits.length < 10 || phoneDigits.length > 15 || !['nova', 'ukr'].includes(carrier)) {
+    return json(res, 400, { ok: false, error: 'Перевірте контактні дані' });
+  }
+  if (carrier === 'nova' && (!city || !warehouse)) {
+    return json(res, 400, { ok: false, error: 'Оберіть місто та відділення Нової пошти' });
+  }
+  if (carrier === 'ukr' && address.length < 8) {
+    return json(res, 400, { ok: false, error: 'Вкажіть повну адресу доставки Укрпоштою' });
+  }
+  if (!rawItems.length) return json(res, 400, { ok: false, error: 'Кошик порожній' });
+
+  try {
+    const normalized = rawItems.map(item => ({
+      id: clean(item.id, 80),
+      quantity: Math.min(99, Math.max(1, Number.parseInt(item.quantity, 10) || 1))
+    }));
+    const products = await loadProducts([...new Set(normalized.map(item => item.id))]);
+    const productMap = new Map(products.map(product => [String(product.id), product]));
+    const items = normalized.map(item => {
+      const product = productMap.get(item.id);
+      if (!product || Number(product.stock) < item.quantity) throw new Error('Один із товарів недоступний у потрібній кількості');
+      return {
+        productId: item.id,
+        name: product.name,
+        price: Number(product.price),
+        quantity: item.quantity,
+        lineTotal: Number(product.price) * item.quantity
+      };
+    });
+    const total = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const order = {
+      customerName, phone,
+      delivery: { carrier, city, warehouse, address },
+      items, total,
+      source: clean(req.body?.source, 120),
+      campaign: clean(req.body?.campaign, 120)
+    };
+
+    await sendTelegram(order);
+
+    let orderId = null;
+    if (isConfigured()) {
+      try {
+        const [saved] = await supabase('orders', {
+          method: 'POST',
+          body: JSON.stringify({
+            customer_name: customerName,
+            phone,
+            carrier,
+            city: carrier === 'nova' ? city : null,
+            warehouse: carrier === 'nova' ? warehouse : null,
+            address: carrier === 'ukr' ? address : null,
+            items,
+            total,
+            source: order.source || null,
+            campaign: order.campaign || null,
+            status: 'new'
+          })
+        });
+        orderId = saved?.id || null;
+      } catch (databaseError) {
+        // Telegram already received the order; do not make the customer retry and create a duplicate.
+        console.error('Order database backup failed', databaseError);
+      }
+    }
+
+    return json(res, 200, { ok: true, orderId });
+  } catch (error) {
+    console.error('Order failed', error);
+    const clientMessage = /недоступний/.test(error.message) ? error.message : 'Не вдалося оформити замовлення';
+    return json(res, 502, { ok: false, error: clientMessage });
   }
 };
